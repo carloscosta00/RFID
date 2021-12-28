@@ -17,8 +17,8 @@ int const pinSelecao = D8; //Pino de seleção entre o modo de leitura da tag e 
 int buttonState = 0;
 
 int const maxCards=50; // Limite de cartões armazenados
-String cards[maxCards] = {}; 
-byte readCard[4]; 
+String cards[maxCards] = {}; // array com todos os cartoes
+byte readCard[4]; // array para armazenar a tag lida
 int const numberOfTags=0; // Endereço da Eeprom em que está guardado o total de cartões guardados da Eeprom
 
 
@@ -147,7 +147,7 @@ void loop()
 
       if (access)
       {
-        microservo9g.write(90);
+        microservo9g.write(90);//Abre o portão
         lcd.clear();
         lcd.print("Acesso permitido");
         lcd.setCursor(0, 1);
