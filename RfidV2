@@ -14,7 +14,10 @@ MFRC522 mfrc522(SS_PIN, RST_PIN);
 Servo microservo9g; 
 
 int const pinSelecao = D8; //Pino de seleção entre o modo de leitura da tag e o modo de escrita na eeprom da tag.
+int const pinRemovetag = A0;
+
 int buttonState = 0;
+int buttonStareRemove = 0;
 
 int const maxCards=50; // Limite de cartões armazenados
 String cards[maxCards] = {}; // array com todos os cartoes
@@ -33,17 +36,68 @@ void readEeprom() // Lê todos dos cartões guardados na eeprom e copia para um 
   }
 }
 
-void writeEeprom(byte a[]){ // Escreve o UID do cartão na Eeprom e soma +1 ao total de cartões
+void writeEeprom(byte tag[]){ // Escreve o UID do cartão na Eeprom e soma +1 ao total de cartões
   int pos = EEPROM.read(numberOfTags) ;//total de cartões
   int position = 10 + (pos * 4);//proximo endereço livre para poder guardar mais uma tag
 
-  EEPROM.write(position,a[0]);
-  EEPROM.write(position + 1,a[1]);
-  EEPROM.write(position + 2,a[2]);
-  EEPROM.write(position + 3,a[3]);
+  EEPROM.write(position,tag[0]);
+  EEPROM.write(position + 1,tag[1]);
+  EEPROM.write(position + 2,tag[2]);
+  EEPROM.write(position + 3,tag[3]);
 
   EEPROM.write(numberOfTags, pos + 1);//soma +1 ao total de cartões
 }
+
+void removeTag(String tag){
+  int pos = EEPROM.read(numberOfTags) ;//total de cartões
+  int position = 10 + (pos * 4);
+
+  int idx=-1;
+  for (int i = 0; i < pos; i++)
+  {
+    if (tag.substring(0) == cards[i].substring(0)){
+      idx=i;
+      break;
+    }
+  }
+    //lcd.clear();
+    //lcd.print("idx:" + String(idx));
+    //idx=0;
+    //delay(5000);
+
+  if (idx>=0)
+  {
+    int startIdx = 10 + (idx * 4); 
+
+    for (int c = startIdx; c < position; c+=4)
+    {
+      EEPROM.write(c,EEPROM.read(c+4));
+      EEPROM.write(c + 1,EEPROM.read(c+5));
+      EEPROM.write(c + 2,EEPROM.read(c+6));
+      EEPROM.write(c + 3,EEPROM.read(c+7));
+    }
+    EEPROM.write(numberOfTags,EEPROM.read(numberOfTags)-1);
+
+    Serial.println("Tag eliminada com sucesso");
+    lcd.clear();
+    lcd.print("A remover...");
+    delay(5000);
+    lcd.clear();
+    lcd.print(" Tag removida");
+    lcd.setCursor(0, 1);
+    lcd.print(" com sucesso   ");
+
+  }
+  else{
+    lcd.clear();
+    lcd.print("erro");
+    lcd.setCursor(0,1);
+    lcd.print(tag);
+  }
+  
+}
+
+
 
 void setup() 
 {
@@ -64,6 +118,7 @@ void setup()
   microservo9g.write(90);
 
   pinMode(pinSelecao,INPUT);
+  pinMode(pinRemovetag,INPUT);
 
   lcd.print("    CENFIM  ");
   lcd.setCursor(0, 1);
@@ -83,6 +138,7 @@ void loop()
   lcd.print("  Para acesso   ");
 
   buttonState = digitalRead(pinSelecao); //lê o estado do botão de seleção
+  buttonStareRemove = analogRead(pinRemovetag); //lê o estado do botão de seleção
   // Espera por um novo cartão
   if ( ! mfrc522.PICC_IsNewCardPresent()) 
   {
@@ -119,6 +175,26 @@ void loop()
   conteudoTag.toUpperCase(); // coloca tudo em maiusculas
   Serial.println("Conteudo da tag: " + conteudoTag);
   Serial.println();
+
+
+if (buttonStareRemove>600)
+{
+  Serial.println("-----Antes-------");
+  for (int c = 0; c <=EEPROM.read(numberOfTags); c++) { // percore o total de tag armazenadas
+          Serial.println(String(c)+" -> " + String(conteudoTag.substring(0)) + " = " + String(cards[c])); 
+        }
+  Serial.println("---------------");
+  Serial.println();
+  removeTag(conteudoTag);
+  Serial.println("-----Depois-------");
+  for (int c = 0; c <=EEPROM.read(numberOfTags); c++) { // percore o total de tag armazenadas
+          Serial.println(String(c)+" -> " + String(conteudoTag.substring(0)) + " = " + String(cards[c])); 
+        }
+  Serial.println("---------------");
+  delay(10000);
+}
+else{
+
 
 
   if (buttonState == HIGH) { // Entra no modo de escrita das tag na eeprom
@@ -163,4 +239,5 @@ void loop()
       }      
   }
  }
-} 
+}
+ }
