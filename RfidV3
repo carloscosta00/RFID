@@ -1,0 +1,296 @@
+#include <Arduino.h>
+#include <EEPROM.h>
+#include <SPI.h>
+#include <MFRC522.h>
+#include <LiquidCrystal_I2C.h>
+#include <Wire.h>
+#include <Servo.h>
+
+#define SS_PIN D4
+#define RST_PIN D3
+
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+MFRC522 mfrc522(SS_PIN, RST_PIN);
+Servo microservo9g;
+
+int const pinSelecao = D8; //Pino de seleção entre o modo de leitura da tag e o modo de escrita na eeprom da tag.
+int const pinRemovetag = A0;
+int buttonState = 0;
+int buttonStareRemove = 0;
+
+int const maxCards = 50;        // Limite de cartões armazenados
+String cards[maxCards][2] = {}; // array com todos os cartoes
+byte readCard[4];               // array para armazenar a tag lida
+int const numberOfTags = 0;     // Endereço da Eeprom em que está guardado o total de cartões guardados da Eeprom
+int const tamanhoTagEeprom = 5; // Numero de bytes necesarios para armazenar uma tag na Eeprom
+int const lugaresOcupados = 1;  // Endereço da Eeprom onde é guardado o contador de lugares ocupados
+
+void readEeprom() // Lê todos dos cartões guardados na eeprom e copia para um array
+{
+  int a = 0;
+  for (int c = 10; c < (maxCards * tamanhoTagEeprom) + 10; c += tamanhoTagEeprom)
+  {
+    cards[a][0] = String(EEPROM.read(c), HEX) + " " + String(EEPROM.read(c + 1), HEX) + " " + String(EEPROM.read(c + 2), HEX) + " " + String(EEPROM.read(c + 3), HEX);
+    cards[a][0].toUpperCase();
+    cards[a][1] = String(EEPROM.read(c + 4), HEX);
+    a += 1;
+  }
+}
+
+void writeEeprom(byte tag[])
+{                                               // Escreve o UID do cartão na Eeprom e soma +1 ao total de cartões
+  int pos = EEPROM.read(numberOfTags);          //total de cartões
+  int position = 10 + (pos * tamanhoTagEeprom); //proximo endereço livre para poder guardar mais uma tag
+
+  EEPROM.write(position, tag[0]);
+  EEPROM.write(position + 1, tag[1]);
+  EEPROM.write(position + 2, tag[2]);
+  EEPROM.write(position + 3, tag[3]);
+  EEPROM.write(position + 4, 0);
+
+  EEPROM.write(numberOfTags, pos + 1); //soma +1 ao total de cartões
+}
+
+void removeTag(String tag)
+{
+  int pos = EEPROM.read(numberOfTags); //total de cartões
+  int position = 10 + (pos * tamanhoTagEeprom);
+
+  int idx = -1;
+  for (int i = 0; i < pos; i++)
+  {
+    if (tag.substring(0) == cards[i][0].substring(0))
+    {
+      idx = i;
+      Serial.println("IDX: " +  String(idx));
+      break;
+    }
+  }
+
+  if (idx >= 0)
+  {
+    int startIdx = 10 + (idx * tamanhoTagEeprom);
+
+    for (int c = startIdx; c < position; c += tamanhoTagEeprom)
+    {
+      EEPROM.write(c, EEPROM.read(c + 4));
+      EEPROM.write(c + 1, EEPROM.read(c + 5));
+      EEPROM.write(c + 2, EEPROM.read(c + 6));
+      EEPROM.write(c + 3, EEPROM.read(c + 7));
+      EEPROM.write(c + 4, EEPROM.read(c + 8));
+    }
+    EEPROM.write(numberOfTags, EEPROM.read(numberOfTags) - 1);
+
+    Serial.println("Tag eliminada com sucesso");
+    lcd.clear();
+    lcd.print(" A remover... ");
+    delay(5000);
+    lcd.clear();
+    lcd.print(" Tag removida");
+    lcd.setCursor(0, 1);
+    lcd.print(" com sucesso   ");
+  }
+  else
+  {
+    lcd.clear();
+    lcd.print("Erro Rem. Tag");
+    lcd.setCursor(0, 1);
+    lcd.print(tag);
+  }
+}
+
+void alteraEstado(String tag)
+{
+
+  int pos = EEPROM.read(numberOfTags); //total de cartões
+  int position = 10 + (pos * tamanhoTagEeprom);
+
+  int idx = -1;
+  for (int i = 0; i < pos; i++)
+  {
+    if (tag.substring(0) == cards[i][0].substring(0))
+    {
+      idx = i;
+      break;
+    }
+  }
+
+  int startIdx = 10 + (idx * tamanhoTagEeprom);
+
+  EEPROM.write(startIdx + 4, !EEPROM.read(startIdx + 4)); // Altera o estado do cartão de preseente para ausente ou de ausente para presente
+}
+
+void setup()
+{
+  lcd.init();
+  lcd.backlight();
+
+  Serial.begin(9600);               // Initiate a serial communication
+  SPI.begin();                      // Initiate  SPI bus
+  mfrc522.PCD_Init();               // Initiate MFRC522
+  EEPROM.begin(410);                //incia a Epprom com 410 Bytes
+  EEPROM.write(numberOfTags, 0);    // Coloca o nº total de tags guardadas a 0
+  EEPROM.write(lugaresOcupados, 0); // Coloca o nº total de tags guardadas a 0
+
+  readEeprom(); // Lê as tags guardadas
+
+  // Define que o servo esta ligado a porta digital 3
+  microservo9g.attach(D0);
+  // Move o servo para a posicao inicial (cancela fechada)
+  microservo9g.write(90);
+
+  pinMode(pinSelecao, INPUT);
+  pinMode(pinRemovetag, INPUT);
+
+  lcd.print("    CENFIM  ");
+  lcd.setCursor(0, 1);
+  lcd.print("    Bem vindo   ");
+
+  delay(4000);
+}
+
+void loop()
+{
+  microservo9g.write(-180); //Portão fechado
+  lcd.clear();
+  lcd.print(" Passe o cartao ");
+  lcd.setCursor(0, 1);
+  lcd.print("  Para acesso   ");
+
+  buttonState = digitalRead(pinSelecao);        //lê o estado do botão de seleção
+  buttonStareRemove = analogRead(pinRemovetag); //lê o estado do botão de seleção
+  // Espera por um novo cartão
+  if (!mfrc522.PICC_IsNewCardPresent())
+  {
+    return;
+  }
+  // Select one of the cards
+  if (!mfrc522.PICC_ReadCardSerial())
+  {
+    return;
+  }
+
+  readEeprom();
+
+  Serial.println("Nº Tags: " + String(EEPROM.read(numberOfTags)));
+  Serial.println(0);
+  Serial.print(" UID tag :");
+  String conteudoTag = "";
+
+  //for (byte i = 0; i < mfrc522.uid.size; i++) //S
+  //{
+  //   Serial.print(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : " ");
+  //   Serial.print(mfrc522.uid.uidByte[i], HEX);
+  //conteudoTag.concat(String(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : " "));
+  //conteudoTag.concat(String(mfrc522.uid.uidByte[i], HEX));
+  //EEPROM.write(10+i,mfrc522.uid.uidByte[i]);
+  //}
+
+  for (int i = 0; i < 4; i++) //Armazena a tag lida num array
+  {
+    readCard[i] = mfrc522.uid.uidByte[i];
+  }
+
+  conteudoTag = String(mfrc522.uid.uidByte[0], HEX) + " " + String(mfrc522.uid.uidByte[1], HEX) + " " + String(mfrc522.uid.uidByte[2], HEX) + " " + String(mfrc522.uid.uidByte[3], HEX); //guarda a tag lida numa string
+  conteudoTag.toUpperCase();                                                                                                                                                             // coloca tudo em maiusculas
+  Serial.println("Conteudo da tag: " + conteudoTag);
+  Serial.println();
+
+  if (buttonStareRemove > 600)
+  {
+    Serial.println("-----Antes-------");
+    for (int c = 0; c <= EEPROM.read(numberOfTags); c++)
+    { // percore o total de tag armazenadas
+      Serial.println(String(c) + " -> " + String(conteudoTag.substring(0)) + " = " + String(cards[c][0]));
+    }
+    Serial.println("---------------");
+    Serial.println();
+    removeTag(conteudoTag);
+    Serial.println("-----Depois-------");
+    for (int c = 0; c <= EEPROM.read(numberOfTags); c++)
+    { // percore o total de tag armazenadas
+      Serial.println(String(c) + " -> " + String(conteudoTag.substring(0)) + " = " + String(cards[c][0]));
+    }
+    Serial.println("---------------");
+    delay(5000);
+  }
+  else
+  {
+    if (buttonState == HIGH)
+    { // Entra no modo de escrita das tag na eeprom
+      Serial.println("Escrever tag");
+      writeEeprom(readCard);
+      Serial.println("Tag Ecrita com sucesso");
+      lcd.clear();
+      lcd.print(" Cartao gravado ");
+      lcd.setCursor(0, 1);
+      lcd.print("  com sucesso  ");
+      delay(5000);
+    }
+    else
+    { //Entra no modo da leitura da tag
+      Serial.println("Ler tag");
+      if (conteudoTag.substring(0) != "")
+      { //se o conteudo da tag for diferente de vazio
+        boolean access = false;
+        boolean entrada = false;
+
+        for (int c = 0; c < EEPROM.read(numberOfTags); c++)
+        { // percore o total de tag armazenadas
+          Serial.println(String(c) + " -> " + String(conteudoTag.substring(0)) + " = " + String(cards[c][0]));
+          if (conteudoTag.substring(0) == cards[c][0])
+          { // se a tag armazenada for igual a tag lida então permite acesso
+            access = true;
+            if (cards[c][1] == "0")
+            { // verifica se está a entrar ou a sair os estacionamento
+              entrada = true;
+            }
+            else
+            {
+              entrada = false;
+            }
+            break;
+          }
+        }
+
+        if (access)
+        {
+          microservo9g.write(90); //Abre o portão
+          lcd.clear();
+          lcd.print(" Acesso permitido ");
+          lcd.setCursor(0, 1);
+          lcd.print("   ");
+          delay(1000);
+          if (entrada)
+          {
+            EEPROM.write(lugaresOcupados, EEPROM.read(lugaresOcupados) + 1); // Quando está a entrar incrementa mais 1 aos lugares ocupados
+            lcd.clear();
+            lcd.print("   Bem Vindo   ");
+            lcd.setCursor(0, 1);
+            lcd.print("   ");
+          }
+          else
+          {
+            EEPROM.write(lugaresOcupados, EEPROM.read(lugaresOcupados) - 1); // quando está a sair decrementa 1 aos lugares ocupados
+            lcd.clear();
+            lcd.print("   Volte Sempre  ");
+            lcd.setCursor(0, 1);
+            lcd.print("   ");
+          }
+
+          alteraEstado(conteudoTag); // Altera na eeprom a presença da tag no estacionamento
+          delay(3000);
+        }
+        else
+        {
+          lcd.clear();
+          lcd.print("  Acesso negado  ");
+          lcd.setCursor(0, 1);
+          lcd.print("   ");
+          delay(3000);
+        }
+        Serial.println("Total de lugares ocupados: " + String(EEPROM.read(lugaresOcupados)));
+      }
+    }
+  }
+}
